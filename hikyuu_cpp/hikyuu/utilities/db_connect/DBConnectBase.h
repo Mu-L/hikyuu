@@ -12,7 +12,9 @@
 
 #include "../../DataType.h"
 #include "../../utilities/Parameter.h"
+#include "DBCondition.h"
 #include "SQLStatementBase.h"
+#include "SQLException.h"
 
 namespace hku {
 
@@ -119,12 +121,29 @@ public:
     void load(T& item, const string& where = "");
 
     /**
+     * 加载模型数据至指定的模型实例
+     * @note 查询条件应只返回一条记录，如果有多条查询结果，将只取一条
+     * @param item 指定的模型实例
+     * @param cond 查询条件，如：“id=1"
+     */
+    template <typename T>
+    void load(T& item, const DBCondition& cond);
+
+    /**
      * 批量加载模型数据至容器（vector，list 等支持 push_back 的容器）
      * @param container 指定容器
      * @param where 查询条件
      */
     template <typename Container>
     void batchLoad(Container& container, const string& where = "");
+
+    /**
+     * 批量加载模型数据至容器（vector，list 等支持 push_back 的容器）
+     * @param container 指定容器
+     * @param cond 查询条件
+     */
+    template <typename Container>
+    void batchLoad(Container& container, const DBCondition& cond);
 
     /**
      * 批量更新
@@ -159,6 +178,47 @@ public:
      */
     template <class InputIterator>
     void batchSaveOrUpdate(InputIterator first, InputIterator last, bool autotrans = true);
+
+    /**
+     * 从指定表中删除符合条件的数据指定条件删除
+     * @param tablename 待删除数据的表名
+     * @param where 删除条件
+     * @param autotrans 启动事务
+     */
+    void remove(const std::string& tablename, const std::string& where, bool autotrans = true);
+
+    /**
+     * 从指定表中删除符合条件的数据指定条件删除
+     * @param tablename 待删除数据的表名
+     * @param where 删除条件
+     * @param autotrans 启动事务
+     */
+    void remove(const std::string& tablename, const DBCondition& cond, bool autotrans = true);
+
+    /**
+     * 删除
+     * @param item 待删除的数据, 通过 item.id() 删除
+     * @param autotrans 启动事务
+     */
+    template <typename T>
+    void remove(T& item, bool autotrans = true);
+
+    /**
+     * 批量删除
+     * @param container 拥有迭代器的容器
+     * @param autotrans 启动事务
+     */
+    template <class Container>
+    void batchRemove(Container& container, bool autotrans = true);
+
+    /**
+     * 批量删除，迭代器中的数据必须是通过 TABLE_BIND 绑定的表模型
+     * @param first 迭代器起始点
+     * @param last 迭代器终止点
+     * @param autotrans 启动事务
+     */
+    template <class InputIterator>
+    void batchRemove(InputIterator first, InputIterator last, bool autotrans = true);
 
     /**
      * 查询单个整数，如：select count(*) from table
@@ -216,6 +276,13 @@ void DBConnectBase::save(T& item, bool autotrans) {
         if (autotrans) {
             commit();
         }
+
+    } catch (hku::SQLException& e) {
+        if (autotrans) {
+            rollback();
+        }
+        SQL_THROW(e.errcode(), "failed save! sql: {}! {}", st->getSqlString(), e.what());
+
     } catch (std::exception& e) {
         if (autotrans) {
             rollback();
@@ -253,6 +320,12 @@ void DBConnectBase::batchSave(InputIterator first, InputIterator last, bool auto
             commit();
         }
 
+    } catch (hku::SQLException& e) {
+        if (autotrans) {
+            rollback();
+        }
+        SQL_THROW(e.errcode(), "failed batch save! sql: {}! {}", st->getSqlString(), e.what());
+
     } catch (std::exception& e) {
         if (autotrans) {
             rollback();
@@ -282,6 +355,11 @@ void DBConnectBase::load(T& item, const string& where) {
     }
 }
 
+template <typename T>
+void DBConnectBase::load(T& item, const DBCondition& cond) {
+    load(item, cond.str());
+}
+
 template <typename Container>
 void DBConnectBase::batchLoad(Container& container, const string& where) {
     std::ostringstream sql;
@@ -297,6 +375,11 @@ void DBConnectBase::batchLoad(Container& container, const string& where) {
         tmp.load(st);
         container.push_back(tmp);
     }
+}
+
+template <typename Container>
+void DBConnectBase::batchLoad(Container& container, const DBCondition& cond) {
+    batchLoad(container, cond.str());
 }
 
 template <class Container>
@@ -321,11 +404,17 @@ void DBConnectBase::batchUpdate(InputIterator first, InputIterator last, bool au
             commit();
         }
 
+    } catch (hku::SQLException& e) {
+        if (autotrans) {
+            rollback();
+        }
+        SQL_THROW(e.errcode(), "failed batch update! sql: {}! {}", st->getSqlString(), e.what());
+
     } catch (std::exception& e) {
         if (autotrans) {
             rollback();
         }
-        HKU_THROW("failed batch save! sql: {}! {}", st->getSqlString(), e.what());
+        HKU_THROW("failed batch update! sql: {}! {}", st->getSqlString(), e.what());
 
     } catch (...) {
         if (autotrans) {
@@ -354,6 +443,114 @@ void DBConnectBase::batchSaveOrUpdate(InputIterator first, InputIterator last, b
 template <class Container>
 inline void DBConnectBase::batchSaveOrUpdate(Container& container, bool autotrans) {
     batchSaveOrUpdate(container.begin(), container.end(), autotrans);
+}
+
+template <typename T>
+void DBConnectBase::remove(T& item, bool autotrans) {
+    HKU_CHECK(item.id() != 0, "Invalid item, id is 0!");
+    SQLStatementPtr st =
+      getStatement(fmt::format("delete from `{}` where id={}", T::getTableName(), item.id()));
+    if (autotrans) {
+        transaction();
+    }
+
+    try {
+        st->exec();
+        if (autotrans) {
+            commit();
+        }
+
+    } catch (hku::SQLException& e) {
+        if (autotrans) {
+            rollback();
+        }
+        SQL_THROW(e.errcode(), "failed delete! sql: {}! {}", st->getSqlString(), e.what());
+
+    } catch (std::exception& e) {
+        if (autotrans) {
+            rollback();
+        }
+        HKU_THROW("failed delete! sql: {}! {}", st->getSqlString(), e.what());
+
+    } catch (...) {
+        if (autotrans) {
+            rollback();
+        }
+        HKU_THROW("failed delete! sql: {}! Unknown error!", st->getSqlString());
+    }
+}
+
+template <class Container>
+inline void DBConnectBase::batchRemove(Container& container, bool autotrans) {
+    batchRemove(container.begin(), container.end(), autotrans);
+}
+
+template <class InputIterator>
+void DBConnectBase::batchRemove(InputIterator first, InputIterator last, bool autotrans) {
+    if (autotrans) {
+        transaction();
+    }
+
+    try {
+        for (InputIterator iter = first; iter != last; ++iter) {
+            remove(*iter);
+        }
+
+        if (autotrans) {
+            commit();
+        }
+
+    } catch (hku::SQLException& e) {
+        if (autotrans) {
+            rollback();
+        }
+        SQL_THROW(e.errcode(), "failed batch delete! {}", e.what());
+
+    } catch (std::exception& e) {
+        if (autotrans) {
+            rollback();
+        }
+        HKU_THROW("failed batch delete! {}", e.what());
+
+    } catch (...) {
+        if (autotrans) {
+            rollback();
+        }
+        HKU_THROW("failed batch delete! Unknown error!");
+    }
+}
+
+inline void DBConnectBase::remove(const std::string& tablename, const std::string& where,
+                                  bool autotrans) {
+    if (autotrans) {
+        transaction();
+    }
+
+    std::string sql(fmt::format("delete from `{}` where {}", tablename, where));
+    try {
+        exec(sql);
+
+    } catch (hku::SQLException& e) {
+        if (autotrans) {
+            rollback();
+        }
+        SQL_THROW(e.errcode(), "Failed exec sql: {}! {}", sql, e.what());
+    } catch (std::exception& e) {
+        if (autotrans) {
+            rollback();
+        }
+        HKU_THROW("Failed exec sql: {}! {}", sql, e.what());
+    } catch (...) {
+        if (autotrans) {
+            rollback();
+        }
+        HKU_THROW(R"(Failed exec sql: {}! Unknown error!)", sql);
+    }
+}
+
+inline void DBConnectBase::remove(const std::string& tablename, const DBCondition& cond,
+                                  bool autotrans) {
+    remove(tablename, cond.str(), autotrans);
 }
 
 }  // namespace hku

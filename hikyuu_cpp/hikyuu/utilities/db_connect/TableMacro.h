@@ -11,6 +11,7 @@
 #define HIKYUU_DB_CONNECT_TABLE_MACRO_H
 
 #include <string>
+#include <sstream>
 #include "DBConnectBase.h"
 #include "SQLStatementBase.h"
 

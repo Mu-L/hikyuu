@@ -22,6 +22,18 @@ HKU_API std::ostream& operator<<(std::ostream& out, const Datetime& d) {
     return out;
 }
 
+Datetime Datetime::fromHex(uint64_t time) {
+    uint64_t second = 0xFFULL & time;
+    uint64_t minute = (0xFF00ULL & time) >> 8;
+    uint64_t hour = (0xFF0000ULL & time) >> 16;
+    uint64_t day = (0xFF000000ULL & time) >> 24;
+    uint64_t month = (0xFF00000000ULL & time) >> 32;
+    uint64_t low_y = (0xFF0000000000ULL & time) >> 40;
+    uint64_t high_y = (0xFF000000000000ULL & time) >> 48;
+    uint64_t year = high_y * 100 + low_y;
+    return Datetime((long)year, (long)month, (long)day, (long)hour, (long)minute, (long)second);
+}
+
 Datetime::Datetime(long year, long month, long day, long hh, long mm, long sec, long millisec,
                    long microsec) {
     HKU_CHECK(millisec >= 0 && millisec <= 999, "Out of range! millisec: {}", millisec);
@@ -115,12 +127,34 @@ std::string Datetime::repr() const {
                        minute(), second(), millisecond(), microsecond());
 }
 
-unsigned long long Datetime::number() const noexcept {
+uint64_t Datetime::number() const noexcept {
     try {
         HKU_IF_RETURN(m_data.date() == bd::date(bd::pos_infin), Null<unsigned long long>());
         return (unsigned long long)year() * 100000000LL + (unsigned long long)month() * 1000000LL +
                (unsigned long long)day() * 10000LL + (unsigned long long)hour() * 100LL +
                (unsigned long long)minute();
+    } catch (std::exception& e) {
+        HKU_ERROR(e.what());
+        return Null<unsigned long long>();
+    } catch (...) {
+        return Null<unsigned long long>();
+    }
+}
+
+uint64_t Datetime::hex() const noexcept {
+    try {
+        HKU_IF_RETURN(m_data.date() == bd::date(bd::pos_infin), Null<unsigned long long>());
+        uint64_t ret = uint64_t(second());
+        ret |= (uint64_t(minute()) << 8);
+        ret |= (uint64_t(hour()) << 16);
+        ret |= (uint64_t(day()) << 24);
+        ret |= (uint64_t(month()) << 32);
+        uint64_t y = uint64_t(year());
+        uint64_t high_y = y / 100;
+        uint64_t low_y = y - high_y * 100;
+        ret |= (low_y << 40);
+        ret |= (high_y << 48);
+        return ret;
     } catch (std::exception& e) {
         HKU_ERROR(e.what());
         return Null<unsigned long long>();

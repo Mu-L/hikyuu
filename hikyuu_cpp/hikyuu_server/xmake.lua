@@ -1,7 +1,7 @@
 target("hkuserver")
     set_kind("binary")
     
-    add_packages("fmt", "spdlog", "flatbuffers", "nng", "nlohmann_json", "sqlite3")
+    add_packages("fmt", "spdlog", "flatbuffers", "nng", "nlohmann_json", "sqlite3", "zlib")
     add_deps("hikyuu")
 
     add_includedirs(".")
@@ -53,6 +53,12 @@ target("hkuserver")
     
     -- add files
     add_files("./**.cpp")
+    add_files("./**.c")
+    --add_files("./**.S")
     --add_files("./main.cpp")
+
+    after_build(function(target)
+        os.cp("$(projectdir)/hikyuu_cpp/hikyuu_server/i8n/", "$(buildir)/$(mode)/$(plat)/$(arch)/lib/")
+    end)
     
 target_end()

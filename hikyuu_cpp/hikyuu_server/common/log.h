@@ -8,7 +8,8 @@
 #pragma once
 
 #include <iostream>
-#include <hikyuu/log.h>
+#include <hikyuu/config.h>
+#include <hikyuu/exception.h>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/ostr.h>
@@ -20,9 +21,25 @@
 #include <fmt/format.h>
 #include <fmt/chrono.h>
 
+#ifndef LOG_ACTIVE_LEVEL
+#define LOG_ACTIVE_LEVEL 0
+#endif
+
 namespace hku {
 
+#if LOG_ACTIVE_LEVEL <= 0
 #define DEFAULT_LOGGER_LEVEL spdlog::level::trace
+#elif LOG_ACTIVE_LEVEL <= 1
+#define DEFAULT_LOGGER_LEVEL spdlog::level::debug
+#elif LOG_ACTIVE_LEVEL <= 2
+#define DEFAULT_LOGGER_LEVEL spdlog::level::info
+#elif LOG_ACTIVE_LEVEL <= 2
+#define DEFAULT_LOGGER_LEVEL spdlog::level::warn
+#elif LOG_ACTIVE_LEVEL <= 3
+#define DEFAULT_LOGGER_LEVEL spdlog::level::err
+#elif LOG_ACTIVE_LEVEL <= 4
+#define DEFAULT_LOGGER_LEVEL spdlog::level::critical
+#endif
 
 inline void init_server_logger() {
     static std::once_flag oc;
@@ -30,12 +47,12 @@ inline void init_server_logger() {
         auto stdout_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         stdout_sink->set_level(DEFAULT_LOGGER_LEVEL);
 
-        spdlog::init_thread_pool(8192, 1);
+        /*spdlog::init_thread_pool(8192, 1);
         std::vector<spdlog::sink_ptr> sinks{stdout_sink};
         auto logger = std::make_shared<spdlog::async_logger>("SERVER", sinks.begin(), sinks.end(),
                                                              spdlog::thread_pool(),
-                                                             spdlog::async_overflow_policy::block);
-
+                                                             spdlog::async_overflow_policy::block);*/
+        auto logger = std::make_shared<spdlog::logger>("SERVER", stdout_sink);
         logger->set_level(DEFAULT_LOGGER_LEVEL);
         logger->flush_on(DEFAULT_LOGGER_LEVEL);
         // logger->set_pattern("%Y-%m-%d %H:%M:%S.%e [%^SERVER-%L%$] - %v (%s:%#)");
@@ -65,65 +82,94 @@ inline void set_logger_level(const std::string& name, int level) {
     }
 }
 
-#define LOG_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
-#define LOG_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
-#define LOG_INFO(...) SPDLOG_INFO(__VA_ARGS__)
-#define LOG_WARN(...) SPDLOG_WARN(__VA_ARGS__)
-#define LOG_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
-#define LOG_FATAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
+#if LOG_ACTIVE_LEVEL <= 0
+#define APP_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
+#else
+#define APP_TRACE(...)
+#endif
+
+#if LOG_ACTIVE_LEVEL <= 1
+#define APP_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
+#else
+#define APP_DEBUG(...)
+#endif
+
+#if LOG_ACTIVE_LEVEL <= 2
+#define APP_INFO(...) SPDLOG_INFO(__VA_ARGS__)
+#else
+#define APP_INFO(...)
+#endif
+
+#if LOG_ACTIVE_LEVEL <= 3
+#define APP_WARN(...) SPDLOG_WARN(__VA_ARGS__)
+#else
+#define APP_WARN(...)
+#endif
+
+#if LOG_ACTIVE_LEVEL <= 4
+#define APP_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
+#else
+#define APP_ERROR(...)
+#endif
+
+#if LOG_ACTIVE_LEVEL <= 5
+#define APP_FATAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
+#else
+#define APP_FATAL(...)
+#endif
 
 /**
  * 满足指定条件时，打印 TRACE 信息
  * @param expr 指定条件
  */
-#define LOG_TRACE_IF(expr, ...) \
+#define APP_TRACE_IF(expr, ...) \
     if (expr) {                 \
-        LOG_TRACE(__VA_ARGS__); \
+        APP_TRACE(__VA_ARGS__); \
     }
 
 /**
  * 满足指定条件时，打印 DEBUG 信息, 并返回指定值
  * @param expr 指定条件
  */
-#define LOG_DEBUG_IF(expr, ...) \
+#define APP_DEBUG_IF(expr, ...) \
     if (expr) {                 \
-        LOG_DEBUG(__VA_ARGS__); \
+        APP_DEBUG(__VA_ARGS__); \
     }
 
 /**
  * 满足指定条件时，打印 INFO 信息, 并返回指定值
  * @param expr 指定条件
  */
-#define LOG_INFO_IF(expr, ...) \
+#define APP_INFO_IF(expr, ...) \
     if (expr) {                \
-        LOG_INFO(__VA_ARGS__); \
+        APP_INFO(__VA_ARGS__); \
     }
 
 /**
  * 满足指定条件时，打印 WARN 信息, 并返回指定值
  * @param expr 指定条件
  */
-#define LOG_WARN_IF(expr, ...) \
+#define APP_WARN_IF(expr, ...) \
     if (expr) {                \
-        LOG_WARN(__VA_ARGS__); \
+        APP_WARN(__VA_ARGS__); \
     }
 
 /**
  * 满足指定条件时，打印 ERROR 信息, 并返回指定值
  * @param expr 指定条件
  */
-#define LOG_ERROR_IF(expr, ...) \
+#define APP_ERROR_IF(expr, ...) \
     if (expr) {                 \
-        LOG_ERROR(__VA_ARGS__); \
+        APP_ERROR(__VA_ARGS__); \
     }
 
 /**
  * 满足指定条件时，打印 FATAL 信息, 并返回指定值
  * @param expr 指定条件
  */
-#define LOG_FATAL_IF(expr, ...) \
+#define APP_FATAL_IF(expr, ...) \
     if (expr) {                 \
-        LOG_FATAL(__VA_ARGS__); \
+        APP_FATAL(__VA_ARGS__); \
     }
 
 /**
@@ -131,7 +177,7 @@ inline void set_logger_level(const std::string& name, int level) {
  * @param expr 指定条件
  * @param ret 返回值
  */
-#define LOG_IF_RETURN(expr, ret) \
+#define APP_IF_RETURN(expr, ret) \
     if (expr) {                  \
         return ret;              \
     }
@@ -141,9 +187,9 @@ inline void set_logger_level(const std::string& name, int level) {
  * @param expr 指定条件
  * @param ret 返回值
  */
-#define LOG_TRACE_IF_RETURN(expr, ret, ...) \
+#define APP_TRACE_IF_RETURN(expr, ret, ...) \
     if (expr) {                             \
-        LOG_TRACE(__VA_ARGS__);             \
+        APP_TRACE(__VA_ARGS__);             \
         return ret;                         \
     }
 
@@ -152,9 +198,9 @@ inline void set_logger_level(const std::string& name, int level) {
  * @param expr 指定条件
  * @param ret 返回值
  */
-#define LOG_DEBUG_IF_RETURN(expr, ret, ...) \
+#define APP_DEBUG_IF_RETURN(expr, ret, ...) \
     if (expr) {                             \
-        LOG_DEBUG(__VA_ARGS__);             \
+        APP_DEBUG(__VA_ARGS__);             \
         return ret;                         \
     }
 
@@ -163,9 +209,9 @@ inline void set_logger_level(const std::string& name, int level) {
  * @param expr 指定条件
  * @param ret 返回值
  */
-#define LOG_INFO_IF_RETURN(expr, ret, ...) \
+#define APP_INFO_IF_RETURN(expr, ret, ...) \
     if (expr) {                            \
-        LOG_INFO(__VA_ARGS__);             \
+        APP_INFO(__VA_ARGS__);             \
         return ret;                        \
     }
 
@@ -174,9 +220,9 @@ inline void set_logger_level(const std::string& name, int level) {
  * @param expr 指定条件
  * @param ret 返回值
  */
-#define LOG_WARN_IF_RETURN(expr, ret, ...) \
+#define APP_WARN_IF_RETURN(expr, ret, ...) \
     if (expr) {                            \
-        LOG_WARN(__VA_ARGS__);             \
+        APP_WARN(__VA_ARGS__);             \
         return ret;                        \
     }
 
@@ -185,9 +231,9 @@ inline void set_logger_level(const std::string& name, int level) {
  * @param expr 指定条件
  * @param ret 返回值
  */
-#define LOG_ERROR_IF_RETURN(expr, ret, ...) \
+#define APP_ERROR_IF_RETURN(expr, ret, ...) \
     if (expr) {                             \
-        LOG_ERROR(__VA_ARGS__);             \
+        APP_ERROR(__VA_ARGS__);             \
         return ret;                         \
     }
 
@@ -196,11 +242,96 @@ inline void set_logger_level(const std::string& name, int level) {
  * @param expr 指定条件
  * @param ret 返回值
  */
-#define LOG_FATAL_IF_RETURN(expr, ret, ...) \
+#define APP_FATAL_IF_RETURN(expr, ret, ...) \
     if (expr) {                             \
-        LOG_FATAL(__VA_ARGS__);             \
+        APP_FATAL(__VA_ARGS__);             \
         return ret;                         \
     }
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// clang/gcc 下使用 __PRETTY_FUNCTION__ 会包含函数参数，可以在编译时指定
+// #define HKU_FUNCTION __PRETTY_FUNCTION__
+//
+///////////////////////////////////////////////////////////////////////////////
+#ifndef HKU_FUNCTION
+#define HKU_FUNCTION __FUNCTION__
+#endif
+
+/**
+ * 若表达式为 false，将抛出 hku::exception 异常, 并附带传入信息
+ * @note 用于外部入参及结果检查
+ */
+#define APP_CHECK(expr, ...)                                                                   \
+    do {                                                                                       \
+        if (!(expr)) {                                                                         \
+            throw hku::exception(fmt::format("CHECK({}) {} [{}] ({}:{})", #expr,               \
+                                             fmt::format(__VA_ARGS__), __FUNCTION__, __FILE__, \
+                                             __LINE__));                                       \
+        }                                                                                      \
+    } while (0)
+
+/**
+ * 若表达式为 false，将抛出指定的异常, 并附带传入信息
+ * @note 用于外部入参及结果检查
+ */
+#define APP_CHECK_THROW(expr, except, ...)                                                         \
+    do {                                                                                           \
+        if (!(expr)) {                                                                             \
+            throw except(fmt::format("CHECK({}) {} [{}] ({}:{})", #expr, fmt::format(__VA_ARGS__), \
+                                     __FUNCTION__, __FILE__, __LINE__));                           \
+        }                                                                                          \
+    } while (0)
+
+#if HKU_DISABLE_ASSERT
+#define LOG_ASSERT(expr)
+#define LOG_ASSERT_M(expr, ...)
+
+#else /* #if HKU_DISABLE_ASSERT */
+
+/**
+ * 若表达式为 false，将抛出 hku::exception 异常
+ * @note 仅用于内部入参检查，编译时可通过 HKU_DISABLE_ASSERT 宏关闭
+ */
+#define LOG_ASSERT(expr)                                                                  \
+    do {                                                                                  \
+        if (!(expr)) {                                                                    \
+            std::string err_msg(fmt::format("ASSERT({})", #expr));                        \
+            HKU_ERROR(err_msg);                                                           \
+            throw hku::exception(                                                         \
+              fmt::format("{} [{}] ({}:{})", err_msg, __FUNCTION__, __FILE__, __LINE__)); \
+        }                                                                                 \
+    } while (0)
+
+/**
+ * 若表达式为 false，将抛出 hku::exception 异常, 并附带传入信息
+ * @note 仅用于内部入参检查，编译时可通过 HKU_DISABLE_ASSERT 宏关闭
+ */
+#define LOG_ASSERT_M(expr, ...)                                                                 \
+    do {                                                                                        \
+        if (!(expr)) {                                                                          \
+            std::string err_msg(fmt::format("ASSERT({}) {}", #expr, fmt::format(__VA_ARGS__))); \
+            HKU_ERROR(err_msg);                                                                 \
+            throw hku::exception(                                                               \
+              fmt::format("{} [{}] ({}:{})", err_msg, __FUNCTION__, __FILE__, __LINE__));       \
+        }                                                                                       \
+    } while (0)
+
+#endif /* #if HKU_DISABLE_ASSERT */
+
+/** 抛出 hku::exception 及传入信息 */
+#define APP_THROW(...)                                                                           \
+    do {                                                                                         \
+        throw hku::exception(fmt::format("EXCEPTION: {} [{}] ({}:{})", fmt::format(__VA_ARGS__), \
+                                         __FUNCTION__, __FILE__, __LINE__));                     \
+    } while (0)
+
+/** 抛出指定异常及传入信息 */
+#define APP_THROW_EXCEPTION(except, ...)                                                 \
+    do {                                                                                 \
+        throw except(fmt::format("EXCEPTION: {} [{}] ({}:{})", fmt::format(__VA_ARGS__), \
+                                 __FUNCTION__, __FILE__, __LINE__));                     \
+    } while (0)
 
 //--------------------------------------------------------------
 //
@@ -210,20 +341,15 @@ inline void set_logger_level(const std::string& name, int level) {
 
 #define CLASS_LOGGER(cls)                                                                        \
 private:                                                                                         \
-    inline static std::shared_ptr<spdlog::async_logger> ms_##cls_logger;                         \
+    inline static std::shared_ptr<spdlog::logger> ms_##cls_logger;                               \
                                                                                                  \
 public:                                                                                          \
-    static std::shared_ptr<spdlog::async_logger> logger() {                                      \
+    static std::shared_ptr<spdlog::logger> logger() {                                            \
         static std::once_flag oc;                                                                \
         std::call_once(oc, [&]() {                                                               \
             auto stdout_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();          \
             stdout_sink->set_level(DEFAULT_LOGGER_LEVEL);                                        \
-                                                                                                 \
-            std::vector<spdlog::sink_ptr> sinks{stdout_sink};                                    \
-            ms_##cls_logger = std::make_shared<spdlog::async_logger>(                            \
-              #cls, sinks.begin(), sinks.end(), spdlog::thread_pool(),                           \
-              spdlog::async_overflow_policy::block);                                             \
-                                                                                                 \
+            ms_##cls_logger = std::make_shared<spdlog::logger>(#cls, stdout_sink);               \
             ms_##cls_logger->set_level(DEFAULT_LOGGER_LEVEL);                                    \
             ms_##cls_logger->flush_on(DEFAULT_LOGGER_LEVEL);                                     \
             ms_##cls_logger->set_pattern("%^%Y-%m-%d %H:%M:%S.%e [" #cls "-%L] - %v (%s:%#)%$"); \
@@ -232,12 +358,41 @@ public:                                                                         
         return ms_##cls_logger;                                                                  \
     }
 
+#if LOG_ACTIVE_LEVEL <= 0
 #define CLS_TRACE(...) SPDLOG_LOGGER_TRACE(logger(), __VA_ARGS__)
+#else
+#define CLS_TRACE(...)
+#endif
+
+#if LOG_ACTIVE_LEVEL <= 1
 #define CLS_DEBUG(...) SPDLOG_LOGGER_DEBUG(logger(), __VA_ARGS__)
+#else
+#define CLS_DEBUG(...)
+#endif
+
+#if LOG_ACTIVE_LEVEL <= 2
 #define CLS_INFO(...) SPDLOG_LOGGER_INFO(logger(), __VA_ARGS__)
+#else
+#define CLS_INFO(...)
+#endif
+
+#if LOG_ACTIVE_LEVEL <= 3
 #define CLS_WARN(...) SPDLOG_LOGGER_WARN(logger(), __VA_ARGS__)
+#else
+#define CLS_WARN(...)
+#endif
+
+#if LOG_ACTIVE_LEVEL <= 4
 #define CLS_ERROR(...) SPDLOG_LOGGER_ERROR(logger(), __VA_ARGS__)
+#else
+#define CLS_ERROR(...)
+#endif
+
+#if LOG_ACTIVE_LEVEL <= 5
 #define CLS_FATAL(...) SPDLOG_LOGGER_CRITICAL(logger(), __VA_ARGS__)
+#else
+#define CLS_FATAL(...)
+#endif
 
 /**
  * 满足指定条件时，打印 TRACE 信息

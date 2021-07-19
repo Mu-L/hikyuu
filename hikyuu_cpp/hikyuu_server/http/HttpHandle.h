@@ -12,9 +12,9 @@
 #include <functional>
 
 #include <nlohmann/json.hpp>
-
 #include "HttpError.h"
-#include "../common/log.h"
+#include "common/mo.h"
+#include "common/log.h"
 
 using json = nlohmann::json;                  // 不保持插入排序
 using ordered_json = nlohmann::ordered_json;  // 保持插入排序
@@ -25,7 +25,7 @@ namespace hku {
 #define NNG_CHECK(rv)                                      \
     {                                                      \
         if (rv != 0) {                                     \
-            HKU_THROW("[NNG_ERROR] {}", nng_strerror(rv)); \
+            APP_THROW("[NNG_ERROR] {}", nng_strerror(rv)); \
         }                                                  \
     }
 
@@ -33,7 +33,7 @@ namespace hku {
 #define NNG_CHECK_M(rv, msg)                                             \
     {                                                                    \
         if (rv != 0) {                                                   \
-            HKU_THROW("[HTTP_ERROR] {} err: {}", msg, nng_strerror(rv)); \
+            APP_THROW("[HTTP_ERROR] {} err: {}", msg, nng_strerror(rv)); \
         }                                                                \
     }
 
@@ -43,6 +43,7 @@ class HttpHandle {
 public:
     HttpHandle() = delete;
     HttpHandle(nng_aio *aio);
+    virtual ~HttpHandle() {}
 
     /** 前处理 */
     virtual void before_run() {}
@@ -57,37 +58,32 @@ public:
         m_filters.push_back(filter);
     }
 
+    /** 获取请求的 url */
+    std::string getReqUrl() const;
+
     /**
      * 获取请求头部信息
      * @param name 头部信息名称
-     * @return 如果获取不到将返回 NULL
+     * @return 如果获取不到将返回""
      */
-    const char *getReqHeader(const char *name) {
-        return nng_http_req_get_header(m_nng_req, name);
-    }
-
-    std::string getReqHeader(const std::string &name) {
-        const char *head = nng_http_req_get_header(m_nng_req, name.c_str());
-        return head ? std::string(head) : std::string();
-    }
+    std::string getReqHeader(const char *name) const;
 
     /**
-     * 获取请求数据
-     * @param[out] data 请求中的数据起始地址，无数据时返回 NULL
-     * @param[out] len 请求中的数据长度
-     * @note 请求中无数据时, len返回的长度可能不为0
+     * 获取请求头部信息
+     * @param name 头部信息名称
+     * @return 如果获取不到将返回""
      */
-    void getReqData(void **data, size_t *len) {
-        nng_http_req_get_data(m_nng_req, data, len);
+    std::string getReqHeader(const std::string &name) const {
+        return getReqHeader(name.c_str());
     }
 
+    /** 根据 Content-Encoding 进行解码，返回解码后的请求数据 */
     std::string getReqData();
 
+    /** 返回请求的 json 数据，如无法解析为json，将抛出异常*/
     json getReqJson();
 
-    /**
-     * 请求的 ulr 中是否包含 query 参数
-     */
+    /** 判断请求的 ulr 中是否包含 query 参数 */
     bool haveQueryParams();
 
     typedef std::unordered_map<std::string, std::string> QueryParams;
@@ -107,29 +103,51 @@ public:
         NNG_CHECK(nng_http_res_set_header(m_nng_res, key, val));
     }
 
-    void setResData(const char *data) {
-        NNG_CHECK(nng_http_res_copy_data(m_nng_res, data, strlen(data)));
-    }
+    /** 设置响应数据，并根据 Content-encoding 进行 gzip 压缩 */
+    void setResData(const char *content);
 
     void setResData(const std::string &content) {
-        NNG_CHECK(nng_http_res_copy_data(m_nng_res, content.data(), content.size()));
+        setResData(content.c_str());
     }
 
     void setResData(const json &data) {
-        std::string x = data.dump();
-        setResData(x);
+        setResData(data.dump());
     }
 
     void setResData(const ordered_json &data) {
-        std::string x = data.dump();
-        setResData(x);
+        setResData(data.dump());
+    }
+
+    /** 获取当前的相应数据 */
+    std::string getResData() const;
+
+    /**
+     * 从 Accept-Language 获取第一个语言类型
+     * @note 非严格 html 协议，仅返回排在最前面的语言类型
+     */
+    std::string getLanguage() const;
+
+    /**
+     * 多语言翻译
+     * @param msgid 待翻译的字符串
+     */
+    std::string _tr(const char *msgid) const {
+        return MOHelper::translate(getLanguage(), msgid);
+    }
+
+    /**
+     * 多语言翻译
+     * @param ctx 翻译上下文
+     * @param msgid 待翻译的字符串
+     */
+    std::string _ctr(const char *ctx, const char *msgid) {
+        return MOHelper::translate(getLanguage(), ctx, msgid);
     }
 
     void operator()();
 
 private:
-    // error未捕获的信息，统一返回500页面
-    void unknown_error(const std::string &errmsg);
+    void processException(int http_status, int errcode, std::string_view err_msg);
 
 protected:
     nng_aio *m_http_aio{nullptr};
@@ -137,6 +155,20 @@ protected:
     nng_http_req *m_nng_req{nullptr};
     nng_http_conn *m_nng_conn{nullptr};
     std::vector<std::function<void(HttpHandle *)>> m_filters;
+
+public:
+    static void enableTrace(bool enable, bool only_traceid = false) {
+        ms_enable_trace = enable;
+        ms_enable_only_traceid = only_traceid;
+    }
+
+protected:
+    void printTraceInfo();
+
+private:
+    // 是否跟踪请求打印
+    inline static bool ms_enable_trace = false;
+    inline static bool ms_enable_only_traceid = false;
 };
 
 #define HTTP_HANDLE_IMP(cls) \

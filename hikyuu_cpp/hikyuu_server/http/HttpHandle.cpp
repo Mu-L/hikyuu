@@ -5,6 +5,12 @@
  *     Author: fasiondog
  */
 
+#include <string_view>
+#include <hikyuu/utilities/arithmetic.h>
+#include <hikyuu/datetime/Datetime.h>
+#include "gzip/compress.hpp"
+#include "gzip/decompress.hpp"
+#include "gzip/utils.hpp"
 #include "url.h"
 #include "HttpHandle.h"
 
@@ -29,95 +35,166 @@ void HttpHandle::operator()() {
             filter(this);
         }
 
+        std::string encodings = getReqHeader("Accept-Encoding");
+        size_t pos = encodings.find("gzip");
+        if (pos != std::string::npos) {
+            setResHeader("Content-Encoding", "gzip");
+        }
+
         before_run();
         run();
         after_run();
 
         // nng_http_res_set_status(m_nng_res, NNG_HTTP_STATUS_OK);
         nng_aio_set_output(m_http_aio, 0, m_nng_res);
-        nng_aio_finish(m_http_aio, 0);
+
+    } catch (nlohmann::json::exception& e) {
+        CLS_WARN("HttpBadRequestError({}): {}", INVALID_JSON_REQUEST, e.what());
+        processException(NNG_HTTP_STATUS_BAD_REQUEST, INVALID_JSON_REQUEST, e.what());
 
     } catch (HttpError& e) {
-        CLS_TRACE("HttpError({}): {}", e.errcode(), e.what());
-        nng_http_res_set_header(m_nng_res, "Content-Type", "application/json; charset=UTF-8");
-        nng_http_res_set_status(m_nng_res, e.status());
-        nng_http_res_set_reason(m_nng_res, e.msg().c_str());
-        nng_http_res_copy_data(m_nng_res, e.msg().c_str(), e.msg().size());
-        nng_aio_set_output(m_http_aio, 0, m_nng_res);
-        nng_aio_finish(m_http_aio, 0);
-
-    } catch (HttpException& e) {
-        CLS_TRACE("HttpException: {}", e.what());
-        nng_http_res_set_header(m_nng_res, "Content-Type", "application/json; charset=UTF-8");
-        nng_http_res_set_status(m_nng_res, e.status());
-        nng_http_res_set_reason(m_nng_res, e.msg().c_str());
-        nng_http_res_copy_data(m_nng_res, e.msg().c_str(), e.msg().size());
-        nng_aio_set_output(m_http_aio, 0, m_nng_res);
-        nng_aio_finish(m_http_aio, 0);
+        CLS_WARN("{}({}): {}", e.name(), e.errcode(), e.what());
+        processException(e.status(), e.errcode(), e.what());
 
     } catch (std::exception& e) {
-        std::string errmsg(e.what());
-        CLS_ERROR(errmsg);
-        unknown_error(errmsg);
+        CLS_ERROR("HttpError({}): {}", NNG_HTTP_STATUS_INTERNAL_SERVER_ERROR, e.what());
+        processException(NNG_HTTP_STATUS_INTERNAL_SERVER_ERROR,
+                         NNG_HTTP_STATUS_INTERNAL_SERVER_ERROR, e.what());
 
     } catch (...) {
-        std::string errmsg("Unknown error!");
-        CLS_ERROR(errmsg);
-        unknown_error(errmsg);
+        CLS_ERROR("HttpError({}): {}", NNG_HTTP_STATUS_INTERNAL_SERVER_ERROR, "Unknown error");
+        processException(NNG_HTTP_STATUS_INTERNAL_SERVER_ERROR,
+                         NNG_HTTP_STATUS_INTERNAL_SERVER_ERROR, "Unknown error");
+    }
+
+    if (ms_enable_trace) {
+        printTraceInfo();
+    }
+
+    nng_aio_finish(m_http_aio, 0);
+}
+
+void HttpHandle::printTraceInfo() {
+    std::string url = getReqUrl();
+    std::string traceid = getReqHeader("traceid");
+    if (ms_enable_only_traceid && traceid.empty()) {
+        return;
+    }
+    Datetime now = Datetime::now();
+    std::string str = fmt::format(
+      "{:>4d}-{:>02d}-{:>02d} {:>02d}:{:>02d}:{:>02d}.{:<03d} [HttpHandle-T] - ", now.year(),
+      now.month(), now.day(), now.hour(), now.minute(), now.second(), now.millisecond());
+    if (traceid.empty()) {
+        CLS_TRACE(
+          "╔════════════════════════════════════════════════════════════\n"
+          "{}║  url: {}\n"
+          "{}║  method: {}\n"
+          "{}║  request: {}\n"
+          "{}║  response: {}\n"
+          "{}╚════════════════════════════════════════",
+          str, url, str, nng_http_req_get_method(m_nng_req), str, getReqData(), str, getResData(),
+          str);
+    } else {
+        CLS_TRACE(
+          "╔════════════════════════════════════════════════════════════\n"
+          "{}║  url:{}\n"
+          "{}║  method: {}\n"
+          "{}║  traceid: {}\n"
+          "{}║  request: {}\n"
+          "{}║  response: {}\n{}╚════════════════════════════════════════",
+          str, url, str, nng_http_req_get_method(m_nng_req), str, traceid, str, getReqData(), str,
+          getResData(), str);
     }
 }
 
-void HttpHandle::unknown_error(const std::string& errmsg) {
+void HttpHandle::processException(int http_status, int errcode, std::string_view err_msg) {
     try {
-        int errcode = NNG_HTTP_STATUS_INTERNAL_SERVER_ERROR;
-        const char* info = "Internal server error!";
-        std::string html_template(
-          R"(<!DOCTYPE html>
-        <html><head><title>{} {}</title>
-        <style>"
-        body {{ font-family: Arial, sans serif; text-align: center }}
-        h1 {{ font-size: 36px; }}
-        span {{ background-color: gray; color: white; padding: 7px; border-radius: 5px }}
-        h2 {{ font-size: 24px; }}
-        p {{ font-size: 20px; }}
-        </style></head>
-        <body><p>&nbsp;</p>
-        <h1><span>{}</span></h1>
-        <h2>{}</h2>
-        <p>{}</p>
-        </body></html>)");
-        std::string html = fmt::format(html_template, errcode, info, errcode, info, errmsg);
-        nng_http_res_set_status(m_nng_res, errcode);
-        nng_http_res_set_reason(m_nng_res, errmsg.c_str());
-        nng_http_res_set_header(m_nng_res, "Content-Type", "text/html; charset=UTF-8");
-        CLS_WARN_IF(nng_http_res_copy_data(m_nng_res, html.c_str(), html.size()),
-                    "Failed nng_http_res_copy_data!");
+        nng_http_res_set_header(m_nng_res, "Content-Type", "application/json; charset=UTF-8");
+        nng_http_res_set_status(m_nng_res, http_status);
+        nng_http_res_set_reason(m_nng_res, err_msg.data());
+        setResData(
+          fmt::format(R"({{"result":false,"errcode":{},"errmsg":"{}"}})", errcode, err_msg));
         nng_aio_set_output(m_http_aio, 0, m_nng_res);
-        nng_aio_finish(m_http_aio, 0);
+    } catch (std::exception& e) {
+        CLS_ERROR(e.what());
     } catch (...) {
         CLS_FATAL("unknown error in finished!");
-        nng_aio_finish(m_http_aio, 0);
     }
+}
+
+std::string HttpHandle::getReqUrl() const {
+    std::string result;
+    const char* url = nng_http_req_get_uri(m_nng_req);
+    if (url) {
+        result = std::string(url);
+    }
+    return result;
+}
+
+std::string HttpHandle::getReqHeader(const char* name) const {
+    std::string result;
+    const char* head = nng_http_req_get_header(m_nng_req, name);
+    if (head) {
+        result = std::string(head);
+    }
+    return result;
 }
 
 std::string HttpHandle::getReqData() {
+    std::string result;
     void* data = nullptr;
     size_t len = 0;
     nng_http_req_get_data(m_nng_req, &data, &len);
-    return data ? std::string((char*)data) : std::string();
+    if (!data || len == 0) {
+        return result;
+    }
+
+    std::string encoding = getReqHeader("Content-Encoding");
+    if (encoding.empty()) {
+        result = std::string((char*)data, len);
+
+    } else if (encoding == "gzip") {
+        gzip::Decompressor decomp;
+        decomp.decompress(result, (char*)data, len);
+
+    } else {
+        throw HttpNotAcceptableError(
+          HttpNotAcceptableError::UNSUPPORT_CONTENT_ENCODING,
+          fmt::format(_ctr("HttpHandle", "Unsupported Content-Encoding format: {}"), encoding));
+    }
+
+    return result;
+}
+
+std::string HttpHandle::getResData() const {
+    std::string result;
+    char* data = nullptr;
+    size_t len = 0;
+    nng_http_res_get_data(m_nng_res, (void**)&data, &len);
+    if (!data || len == 0) {
+        return result;
+    }
+
+    if (!gzip::is_compressed(data, len)) {
+        result = std::string(data, len);
+        return result;
+    }
+
+    gzip::Decompressor decomp;
+    decomp.decompress(result, data, len);
+    return result;
 }
 
 json HttpHandle::getReqJson() {
-    void* data;
-    size_t len;
-    nng_http_req_get_data(m_nng_req, &data, &len);
-    HTTP_CHECK(data, INVALID_JSON_REQUEST, "Req data is empty!");
+    std::string data = getReqData();
     json result;
     try {
-        result = json::parse((const char*)data);
+        if (!data.empty()) {
+            result = json::parse(data);
+        }
     } catch (json::exception& e) {
-        HKU_ERROR("Failed parse json: {}", (const char*)data);
-        throw HttpError(INVALID_JSON_REQUEST, e.what());
+        APP_ERROR("Failed parse json: {}", data);
+        throw HttpBadRequestError(BadRequestErrorCode::INVALID_JSON_REQUEST, e.what());
     }
     return result;
 }
@@ -171,6 +248,30 @@ bool HttpHandle::getQueryParams(QueryParams& query_params) {
     }
 
     return query_params.size() != 0;
+}
+
+void HttpHandle::setResData(const char* content) {
+    const char* encoding = nng_http_res_get_header(m_nng_res, "Content-Encoding");
+    if (!encoding) {
+        NNG_CHECK(nng_http_res_copy_data(m_nng_res, content, strlen(content)));
+    } else {
+        gzip::Compressor comp(Z_DEFAULT_COMPRESSION);
+        std::string output;
+        comp.compress(output, content, strlen(content));
+        NNG_CHECK(nng_http_res_copy_data(m_nng_res, output.c_str(), output.size()));
+    }
+}
+
+std::string HttpHandle::getLanguage() const {
+    std::string lang = getReqHeader("Accept-Language");
+    auto pos = lang.find_first_of(',');
+    if (pos != std::string::npos) {
+        lang = lang.substr(0, pos);
+    }
+    if (!lang.empty()) {
+        to_lower(lang);
+    }
+    return lang;
 }
 
 }  // namespace hku

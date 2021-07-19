@@ -8,6 +8,7 @@
 #pragma once
 
 #include "../RestHandle.h"
+#include "bcrypt/BCrypt.hpp"
 
 namespace hku {
 
@@ -15,7 +16,7 @@ class StatusHandle : public RestHandle {
     REST_HANDLE_IMP(StatusHandle)
 
     virtual void run() override {
-        setResData(R"({"status": "running"})");
+        res["status"] = "running";
     }
 };
 

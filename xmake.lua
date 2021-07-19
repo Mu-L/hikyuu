@@ -1,4 +1,4 @@
-set_xmakever("2.2.5")
+set_xmakever("2.5.4")
 
 -- project
 set_project("hikyuu")
@@ -36,13 +36,21 @@ set_languages("cxx17", "C99")
 
 add_plugindirs("./xmake_plugins")
 
-add_requires("sqlite3", {configs = {shared=true, vs_runtime="MD", cxflags="-fPIC"}})
 add_requires("fmt", {system=false, configs = {header_only = true, vs_runtime = "MD"}})
 add_requires("spdlog", {system=false, configs = {header_only = true, fmt_external=true, vs_runtime = "MD"}})
 add_requires("flatbuffers", {system=false, configs = {vs_runtime="MD"}})
 add_requires("nng", {system=false, configs = {vs_runtime="MD", cxflags="-fPIC"}})
 add_requires("nlohmann_json", {system=false})
 add_requires("cpp-httplib", {system=false})
+add_requires("zlib", {system=false})
+
+if is_plat("linux") and linuxos.name() == "ubuntu" then
+    add_requires("apt::libhdf5-dev", "apt::libmysqlclient-dev", "apt::libsqlite3-dev")
+elseif is_plat("macosx") then
+    add_requires("brew::hdf5")
+else
+    add_requires("sqlite3", {configs = {shared=true, vs_runtime="MD", cxflags="-fPIC"}})
+end
 
 add_defines("SPDLOG_DISABLE_DEFAULT_LOGGER")  -- 禁用 spdlog 默认 logger
 
@@ -102,7 +110,7 @@ if not is_plat("windows") then
     add_ldflags("-pthread")
 end
 
-add_vectorexts("sse", "sse2", "sse3", "ssse3", "mmx", "avx")
+--add_vectorexts("sse", "sse2", "sse3", "ssse3", "mmx", "avx")
 
 add_subdirs("./hikyuu_cpp/hikyuu")
 add_subdirs("./hikyuu_pywrap")
